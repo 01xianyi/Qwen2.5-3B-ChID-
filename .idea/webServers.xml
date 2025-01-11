@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="1466a7f2-59a8-4dfe-aef2-4a1b43f7d5e3" name="2-houdeyun">
+        <fileTransfer rootFolder="/root" accessType="SFTP" host="hgh2.dc.huixingyun.com" port="57543" sshConfigId="780573a0-2531-4f2a-884b-018854039f47" sshConfig="root@hgh2.dc.huixingyun.com:57543 password">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>

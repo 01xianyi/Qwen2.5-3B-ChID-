@@ -1,0 +1,19 @@
+displayName: ChID(Chinese IDiom dataset)
+labelTypes:
+- Chinese Corpus
+license:
+- Apache 2.0
+mediaTypes:
+- Text
+paperUrl: https://arxiv.org/pdf/1906.01265v3.pdf
+publishDate: "2019-01-01"
+publishUrl: https://github.com/chujiezheng/ChID-Dataset
+publisher:
+- Nanyang Technological University
+- Tsinghua University
+- Beijing National Research Center for Information Science and Technology
+tags: []
+taskTypes:
+- Machine Reading Comprehension
+- Reading Comprehension
+- Language Modelling
