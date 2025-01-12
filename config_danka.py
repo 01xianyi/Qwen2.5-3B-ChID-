@@ -7,16 +7,16 @@ import os
 class DeepSpeedConfig:
     """DeepSpeed相关配置"""
     enabled: bool = True
-    stage: int = 2  # ZeRO stage
-    offload_optimizer: bool = True  # 是否将优化器状态放到CPU
-    offload_param: bool = False  # 是否将参数放到CPU
-    overlap_comm: bool = True  # 是否开启通信重叠
-    allgather_bucket_size: int = int(5e8)  # allgather桶大小
-    reduce_bucket_size: int = int(5e8)  # reduce桶大小
-    min_bucket_size: int = 100  # 最小桶大小
-    contiguous_gradients: bool = True  # 是否使用连续梯度
-    cpu_offload_pin_memory: bool = True  # 是否使用固定内存
-    local_rank: int = -1  # 本地GPU序号，由DeepSpeed自动设置
+    stage: int = 2
+    offload_optimizer: bool = True
+    offload_param: bool = False
+    overlap_comm: bool = True
+    allgather_bucket_size: int = int(5e8)
+    reduce_bucket_size: int = int(5e8)
+    min_bucket_size: int = 100
+    contiguous_gradients: bool = True
+    cpu_offload_pin_memory: bool = True
+    local_rank: int = -1
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为DeepSpeed配置字典"""
@@ -41,10 +41,12 @@ class DeepSpeedConfig:
                 }
             },
             "fp16": {
-                "enabled": "auto",
-                "loss_scale": 0,
-                "loss_scale_window": 1000,
-                "hysteresis": 2,
+                "enabled": True,
+                "auto_cast": True,
+                "loss_scale": 0,      # 0 表示使用动态损失缩放
+                "initial_scale_power": 12,  # 2^12 = 4096 作为初始缩放值
+                "loss_scale_window": 2000,
+                "hysteresis": 4,
                 "min_loss_scale": 1
             },
             "zero_optimization": {

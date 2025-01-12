@@ -5,10 +5,10 @@ deepspeed --num_gpus=4 danka.py \
     --lora_alpha 32 \
     --lora_dropout 0.1 \
     --output_dir "./output" \
-    --per_device_train_batch_size 8 \
-    --gradient_accumulation_steps 2 \
+    --per_device_train_batch_size 4 \
+    --gradient_accumulation_steps 4 \
     --num_train_epochs 3 \
-    --learning_rate 5e-4 \
+    --learning_rate 4e-4 \
     --save_steps 500 \
     --logging_steps 50 \
     --fp16 \

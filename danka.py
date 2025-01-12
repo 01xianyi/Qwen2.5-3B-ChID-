@@ -66,8 +66,6 @@ class DataArguments:
 @dataclass
 class TrainingArguments(TransformersTrainingArguments):
     """训练相关参数"""
-    # 基础参数在 TransformersTrainingArguments 中已经定义了
-    # 这里只改写/新增我们特别关注的字段
     output_dir: str = field(default="./output")
     num_train_epochs: float = field(default=3.0)
     per_device_train_batch_size: int = field(default=4)
@@ -78,15 +76,15 @@ class TrainingArguments(TransformersTrainingArguments):
     logging_steps: int = field(default=50)
     save_total_limit: int = field(default=2)
     fp16: bool = field(default=True)
+    max_grad_norm: float = field(default=1.0, metadata={"help": "梯度裁剪的最大范数"})
     # 启用 TensorBoard 日志记录
     report_to: List[str] = field(default_factory=lambda: ["tensorboard"])
-    # 指定日志目录
     logging_dir: str = field(default="./logs")
-    # deepspeed配置文件：默认写死为 ./deepspeed_config.json
     deepspeed: Optional[str] = field(
         default="./deepspeed_config.json",
         metadata={"help": "DeepSpeed配置文件路径（写死示例）"}
     )
+
 
 
 
