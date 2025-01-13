@@ -9,3 +9,5 @@ ChID为数据集位置
 3.1%sample.py 采样1%数据（可选）
 
 4.train_base_3b_danka.sh 进行训练
+
+5.evalue.py 进行评估
