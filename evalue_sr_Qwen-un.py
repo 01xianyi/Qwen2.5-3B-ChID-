@@ -1,3 +1,5 @@
+#python  evalue.py --base_model_path /root/.cache/modelscope/hub/Qwen/Qwen2.5-3B --eval_file /root/data/ChID/processed/test.json 
+
 import os
 import json
 import torch
