@@ -1,174 +1,265 @@
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from peft import PeftModel
-import json
-from tqdm import tqdm
+#python  evalue.py --adapter_path ./output/checkpoint-20280 --base_model_path /root/.cache/modelscope/hub/Qwen/Qwen2.5-3B --eval_file /root/data/ChID/processed/test.json 
 import os
-import re
-import sys
+import json
+import torch
+from dataclasses import dataclass, field
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    HfArgumentParser
+)
+from peft import PeftModel
+from tqdm import tqdm
 from typing import List, Dict
-from rich.live import Live
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn, BarColumn, TextColumn
-from rich.panel import Panel
-from rich.layout import Layout
-
-console = Console()
 
 
-def create_progress_table(accuracy: float = 0.0, processed: int = 0, total: int = 0):
-    """创建进度显示面板"""
-    layout = Layout()
-    progress_text = f"当前准确率: {accuracy:.4f} [{processed}/{total}]"
-    return Panel(progress_text, title="评估进度", border_style="cyan")
-
-
-def evaluate_model(model, tokenizer, test_file: str) -> Dict:
-    """评估模型在测试集上的表现"""
-    correct = 0
-    total = 0
-    results = []
-
-    # 首先计算总行数
-    with open(test_file, 'r', encoding='utf-8') as f:
-        total_lines = sum(1 for line in f if line.strip())
-
-    # 使用rich.live来创建实时更新的显示
-    with Live(create_progress_table(0.0, 0, total_lines), refresh_per_second=4) as live:
-        with torch.no_grad():
-            with open(test_file, 'r', encoding='utf-8') as f:
-                for line in f:
-                    if not line.strip():
-                        continue
-
-                    data = json.loads(line)
-                    text = data['text']
-
-                    # 获取真实答案
-                    answer_parts = text.split('经过分析，最适合填入<mask>处的成语是')
-                    if len(answer_parts) < 2:
-                        continue
-                    true_answer = extract_answer(answer_parts[1])
-
-                    # 获取用户问题部分
-                    question = answer_parts[0] + "经过分析，最适合填入<mask>处的成语是"
-
-                    # 生成答案
-                    inputs = tokenizer(question, return_tensors="pt")
-                    inputs = {k: v.to(model.device) for k, v in inputs.items()}
-
-                    outputs = model.generate(
-                        **inputs,
-                        max_new_tokens=50,
-                        num_beams=4,
-                        temperature=0.7,
-                        top_p=0.9,
-                        do_sample=True,
-                        repetition_penalty=1.1
-                    )
-
-                    predicted_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-                    predicted_answer = extract_answer(predicted_text)
-
-                    # 记录结果
-                    is_correct = (predicted_answer == true_answer)
-                    correct += int(is_correct)
-                    total += 1
-
-                    # 更新进度显示
-                    current_accuracy = correct / total
-                    live.update(create_progress_table(current_accuracy, total, total_lines))
-
-                    results.append({
-                        'question': text,
-                        'true_answer': true_answer,
-                        'predicted_answer': predicted_answer,
-                        'is_correct': is_correct
-                    })
-
-    # 计算最终准确率
-    accuracy = correct / total if total > 0 else 0
-    metrics = {
-        'accuracy': accuracy,
-        'total_samples': total,
-        'correct_predictions': correct
-    }
-
-    return metrics, results
-
-
-def load_model_and_tokenizer(base_model_path: str, adapter_path: str):
-    """加载模型和tokenizer"""
-    console.print("[yellow]正在加载tokenizer...[/yellow]")
-    tokenizer = AutoTokenizer.from_pretrained(
-        base_model_path,
-        trust_remote_code=True,
-        pad_token="<|extra_0|>",
-        local_files_only=True
+@dataclass
+class EvalArguments:
+    """评估相关参数"""
+    base_model_path: str = field(
+        default="/root/.cache/modelscope/hub/Qwen/Qwen2.5-3B",
+        metadata={"help": "基座模型路径"}
+    )
+    adapter_path: str = field(
+        default="./output/checkpoint-20280",
+        metadata={"help": "adapter检查点路径"}
+    )
+    eval_file: str = field(
+        default="/root/data/ChID/processed/test.json",
+        metadata={"help": "测试数据路径"}
+    )
+    batch_size: int = field(
+        default=322,
+        metadata={"help": "评估时的批量大小"}
+    )
+    max_new_tokens: int = field(
+        default=64,
+        metadata={"help": "生成的最大新tokens数"}
+    )
+    num_beams: int = field(
+        default=1,
+        metadata={"help": "生成时的束搜索数"}
     )
 
-    console.print("[yellow]正在加载基础模型...[/yellow]")
-    model = AutoModelForCausalLM.from_pretrained(
-        base_model_path,
-        trust_remote_code=True,
-        device_map="auto",
-        torch_dtype=torch.float16
-    )
 
-    console.print("[yellow]正在加载LoRA权重...[/yellow]")
-    model = PeftModel.from_pretrained(model, adapter_path)
-    model.eval()
+def load_model_and_tokenizer(args):
+    """加载模型和分词器"""
+    print(f"正在加载基座模型: {args.base_model_path}")
 
-    console.print("[bold green]✓[/bold green] 模型加载完成！")
+    try:
+        # 使用默认配置加载模型
+        model = AutoModelForCausalLM.from_pretrained(
+            args.base_model_path,
+            torch_dtype=torch.float16,
+            trust_remote_code=True,
+            device_map="auto"
+        )
+        print("基座模型加载完成。")
+    except Exception as e:
+        print(f"加载基座模型时出错: {str(e)}")
+        raise e
+
+    try:
+        # 加载adapter权重
+        print(f"正在加载adapter权重: {args.adapter_path}")
+        model = PeftModel.from_pretrained(model, args.adapter_path)
+        model.eval()
+        print("adapter权重加载完成。")
+    except Exception as e:
+        print(f"加载adapter权重时出错: {str(e)}")
+        raise e
+
+    try:
+        # 加载tokenizer
+        print("正在加载tokenizer...")
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.base_model_path,
+            trust_remote_code=True,
+            padding_side="left"
+        )
+        print("tokenizer加载完成。")
+    except Exception as e:
+        print(f"加载tokenizer时出错: {str(e)}")
+        raise e
+
+    # 确保有padding token
+    if not tokenizer.pad_token:
+        tokenizer.pad_token = tokenizer.eos_token
+        print("pad_token未定义，已设置为eos_token。")
+
+    # 获取设备信息
+    device = next(model.parameters()).device
+    print(f"模型所在设备: {device}")
+
     return model, tokenizer
 
 
-def extract_answer(text: str) -> str:
-    """从回答中提取成语"""
-    match = re.search(r"'(.*?)'", text)
-    if match:
-        return match.group(1)
-    return ""
+def process_batch(texts: List[str], tokenizer, model, args) -> List[Dict]:
+    """处理一个批次的样本"""
+    try:
+        # 构造输入
+        inputs = tokenizer(
+            texts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=512,
+            add_special_tokens=True
+        )
+
+        # 获取设备信息
+        device = next(model.parameters()).device
+
+        # 将输入移到正确的设备上
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        # 生成回答
+        with torch.no_grad():
+            generation_output = model.generate(
+                **inputs,
+                max_new_tokens=args.max_new_tokens,
+                num_beams=args.num_beams,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+            )
+
+        # 解码输出
+        responses = tokenizer.batch_decode(generation_output, skip_special_tokens=True)
+
+        results = []
+        for text, response in zip(texts, responses):
+            # 提取用户输入和正确答案
+            parts = text.split('<|im_start|>assistant\n')
+            if len(parts) < 2:
+                print("文本分割后部分不足，跳过此样本。")
+                continue
+            user_query = parts[0].strip()
+            assistant_response = parts[1].split('<|im_end|>')[0].strip()
+
+            # 提取正确答案
+            ground_truth = ""
+            try:
+                if "'" in assistant_response:
+                    start_idx = assistant_response.find("'")
+                    end_idx = assistant_response.find("'", start_idx + 1)
+                    ground_truth = assistant_response[start_idx + 1:end_idx].strip()
+                elif '"' in assistant_response:
+                    start_idx = assistant_response.find('"')
+                    end_idx = assistant_response.find('"', start_idx + 1)
+                    ground_truth = assistant_response[start_idx + 1:end_idx].strip()
+            except Exception as e:
+                print(f"提取 ground_truth 时出错: {str(e)}")
+                continue
+
+            if not ground_truth:
+                print("未找到 ground_truth，跳过此样本。")
+                continue
+
+            # 提取预测答案
+            prediction = ""
+            try:
+                if "'" in response:
+                    start_idx = response.find("'")
+                    end_idx = response.find("'", start_idx + 1)
+                    prediction = response[start_idx + 1:end_idx].strip()
+                elif '"' in response:
+                    start_idx = response.find('"')
+                    end_idx = response.find('"', start_idx + 1)
+                    prediction = response[start_idx + 1:end_idx].strip()
+            except Exception as e:
+                print(f"提取 prediction 时出错: {str(e)}")
+                prediction = ""
+
+            results.append({
+                "ground_truth": ground_truth,
+                "prediction": prediction,
+                "correct": prediction == ground_truth,
+                "full_response": response
+            })
+
+        return results
+
+    except Exception as e:
+        print(f"处理批次时出错: {str(e)}")
+        return []
 
 
 def main():
-    # 模型路径配置
-    base_model_path = "/root/.cache/modelscope/hub/Qwen/Qwen2.5-3B"
-    adapter_path = "./output/checkpoint-2000"
-    test_file = "/root/data/ChID/processed/sampled/eval_sampled.json"
+    # 解析参数
+    parser = HfArgumentParser(EvalArguments)
+    args = parser.parse_args_into_dataclasses()[0]
 
-    # 创建输出目录
-    output_dir = "./evaluation_results"
-    os.makedirs(output_dir, exist_ok=True)
+    # 加载模型和分词器
+    model, tokenizer = load_model_and_tokenizer(args)
 
-    console.print("\n[bold cyan]成语填空模型评估[/bold cyan]")
+    # 加载评估数据
+    print(f"正在加载评估数据: {args.eval_file}")
+    eval_data = []
+    try:
+        with open(args.eval_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.strip():
+                    eval_data.append(json.loads(line))
+        print(f"加载了 {len(eval_data)} 条评估数据")
+    except Exception as e:
+        print(f"加载评估数据时出错: {str(e)}")
+        return
 
-    # 加载模型
-    model, tokenizer = load_model_and_tokenizer(base_model_path, adapter_path)
+    # 评估
+    results = []
+    correct_count = 0
+    total_count = 0
 
-    # 执行评估
-    console.print("\n[bold cyan]开始评估...[/bold cyan]")
-    metrics, results = evaluate_model(model, tokenizer, test_file)
+    batch_size = args.batch_size
+    num_batches = (len(eval_data) + batch_size - 1) // batch_size
 
-    # 打印评估结果
-    console.print(Panel.fit(
-        f"[green]准确率:[/green] {metrics['accuracy']:.4f}\n"
-        f"[green]正确预测数:[/green] {metrics['correct_predictions']}\n"
-        f"[green]总样本数:[/green] {metrics['total_samples']}",
-        title="评估结果",
-        border_style="green"
-    ))
+    for batch_num in tqdm(range(num_batches), desc="Evaluating"):
+        batch = eval_data[batch_num * batch_size : (batch_num + 1) * batch_size]
+        texts = [item.get('text', '') for item in batch]
+        batch_results = process_batch(texts, tokenizer, model, args)
 
-    # 保存详细结果
-    output_file = os.path.join(output_dir, "evaluation_results.json")
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump({
-            'metrics': metrics,
-            'results': results
-        }, f, ensure_ascii=False, indent=2)
+        for result in batch_results:
+            results.append(result)
+            if result['correct']:
+                correct_count += 1
+            total_count += 1
 
-    console.print(f"\n[bold green]✓[/bold green] 详细结果已保存至: {output_file}")
+        # 实时输出当前准确率
+        if total_count > 0:
+            current_accuracy = (correct_count / total_count) * 100
+            print(f"\n当前准确率: {current_accuracy:.2f}% ({correct_count}/{total_count})")
+
+    # 计算最终指标
+    final_accuracy = (correct_count / total_count * 100) if total_count > 0 else 0
+
+    # 打印结果
+    print("\n=== 最终评估结果 ===")
+    print(f"准确率: {final_accuracy:.2f}%")
+    print(f"正确数量: {correct_count}")
+    print(f"总样本数: {total_count}")
+
+    # 保存结果
+    output = {
+        "metrics": {
+            "accuracy": final_accuracy,
+            "correct_count": correct_count,
+            "total_count": total_count
+        },
+        "detailed_results": results[:100]  # 根据需要调整保存的详细结果数量
+    }
+
+    output_file = os.path.join(args.adapter_path, "eval_results.json")
+    try:
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(output, f, indent=4, ensure_ascii=False)
+        print(f"\n评估结果已保存至: {output_file}")
+    except Exception as e:
+        print(f"保存评估结果时出错: {str(e)}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"脚本运行时发生未捕获的错误: {str(e)}")
